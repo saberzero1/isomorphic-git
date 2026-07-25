@@ -2,8 +2,6 @@ export * from './AlreadyExistsError.js'
 export * from './AmbiguousError.js'
 // BaseError.js
 export * from './CheckoutConflictError.js'
-export * from './CherryPickMergeCommitError.js'
-export * from './CherryPickRootCommitError.js'
 export * from './CommitNotFetchedError.js'
 export * from './EmptyCommitError.js'
 export * from './EmptyServerResponseError.js'

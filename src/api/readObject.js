@@ -158,7 +158,7 @@ import { resolveFilepath } from '../utils/resolveFilepath.js'
  * @deprecated
  * > This command is overly complicated.
  * >
- * > If you know the type of object you are reading, use [`readBlob`](./readBlob.md), [`readCommit`](./readCommit.md), [`readTag`](./readTag.md), or [`readTree`](./readTree.md).
+ * > If you know the type of object you are reading, use [`readBlob`](./readBlob.md), [`readCommit`](./readCommit.md), or [`readTree`](./readTree.md).
  *
  * @param {object} args
  * @param {FsClient} args.fs - a file system client
