@@ -28,6 +28,7 @@ describe('exports', () => {
         "fetch",
         "findMergeBase",
         "findRoot",
+        "gc",
         "getConfig",
         "getConfigAll",
         "getRemoteInfo",

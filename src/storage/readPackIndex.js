@@ -1,6 +1,6 @@
 import { GitPackIndex } from '../models/GitPackIndex.js'
 
-const PackfileCache = Symbol('PackfileCache')
+export const PackfileCache = Symbol('PackfileCache')
 
 async function loadPackIndex({
   fs,

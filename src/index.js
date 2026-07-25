@@ -23,6 +23,7 @@ import { findRoot } from './api/findRoot.js'
 import { getConfig } from './api/getConfig.js'
 import { getConfigAll } from './api/getConfigAll.js'
 import { getRemoteInfo } from './api/getRemoteInfo.js'
+import { gc } from './api/gc.js'
 import { hashBlob } from './api/hashBlob.js'
 import { indexPack } from './api/indexPack.js'
 import { init } from './api/init.js'
@@ -86,6 +87,7 @@ export {
   findMergeBase,
   findRoot,
   getRemoteInfo,
+  gc,
   hashBlob,
   indexPack,
   init,
@@ -148,6 +150,7 @@ export default {
   findMergeBase,
   findRoot,
   getRemoteInfo,
+  gc,
   hashBlob,
   indexPack,
   init,
