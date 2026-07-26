@@ -2,14 +2,14 @@
 /__tests__/__fixtures__/.superblock.txt
 /__tests__/__fixtures__/index.json
 
-# Dist
-/http
-/managers
-/models
-/index.cjs
-/index.d.cts
-/index.js
-/index.d.ts
+# Dist (built outputs committed for GitHub URL installs)
+# /http — committed
+# /managers — committed
+# /models — committed
+# /index.cjs — committed
+# /index.d.cts — committed
+# /index.js — committed
+# /index.d.ts — committed
 /index.umd.min.js
 /index.umd.min.js.LICENSE.txt
 /index.umd.min.d.ts
