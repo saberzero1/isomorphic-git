@@ -1,5 +1,5 @@
 {
-  "name": "isomorphic-git",
+  "name": "@saberzero1/isomorphic-git",
   "version": "0.0.0-development",
   "description": "isomorphic-git fork for Quartz Syncer — stripped API, GC support, memory fixes",
   "type": "module",
