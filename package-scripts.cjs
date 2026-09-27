@@ -16,9 +16,8 @@ const optional = cmd =>
 
 const timeout = n => cmd => `timeout -t ${n}m -- ${cmd}`
 // const timeout15 = timeout(15)
-const timeout15 = (command) =>
+const timeout15 = command =>
   process.platform === 'win32' ? command : `timeout -t 15m -- ${command}`
-
 
 /**
  * Returns the environment variables to configure bundlewatch for the current CI provider.
@@ -65,7 +64,8 @@ const bundlewatchEnvironmentVariables = () => {
 const jestEnv =
   'NODE_OPTIONS="--experimental-vm-modules --max-old-space-size-percentage=80" TEST_ENV=node'
 
-const jestCommand = 'node --experimental-vm-modules --max-old-space-size-percentage=80 node_modules/jest/bin/jest.js --ci --coverage'
+const jestCommand =
+  'node --experimental-vm-modules --max-old-space-size-percentage=80 node_modules/jest/bin/jest.js --ci --coverage'
 // const jestCommand = 'jest --ci --coverage'
 // const jestCommand = 'jest --ci --coverage --runInBand --logHeapUsage'
 
@@ -116,7 +116,7 @@ module.exports = {
         'build.webpack',
         'build.indexjson',
         'build.treeshake',
-        'build.docs',
+        // 'build.docs',
         'build.size',
         'build.pack'
       ),
@@ -136,7 +136,7 @@ module.exports = {
       indexjson:
         'npx make-index __tests__/__fixtures__ -o __tests__/__fixtures__/index.json -i __tests__/__fixtures__/index.json && node __tests__/__helpers__/make_superblock.cjs',
       treeshake: 'agadoo',
-      docs: 'node ./__tests__/__helpers__/generate-docs.cjs',
+      // docs: 'node ./__tests__/__helpers__/generate-docs.cjs',
       size: process.env.CI
         ? optional(`cross-env ${bundlewatchEnvironmentVariables()} bundlewatch`)
         : optional(`cross-env bundlewatch`),
@@ -191,9 +191,9 @@ module.exports = {
       setup: series.nps('proxy.start', 'gitserver.start'),
       teardown: series.nps('proxy.stop', 'gitserver.stop'),
       node: process.env.CI
-        ? (process.platform === 'win32'
-            ? `cross-env ${jestEnv} ${retry3(jestCommand)}`
-            : `export ${jestEnv}\n${retry3(timeout15(jestCommand))}`)
+        ? process.platform === 'win32'
+          ? `cross-env ${jestEnv} ${retry3(jestCommand)}`
+          : `export ${jestEnv}\n${retry3(timeout15(jestCommand))}`
         : `cross-env-shell ${jestEnv} ${jestCommand}`,
       chrome: jestBrowser('chrome'),
       firefox: jestBrowser('firefox'),
