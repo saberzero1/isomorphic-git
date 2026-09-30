@@ -86,6 +86,7 @@ node_modules
 
 # Plan files
 .sisyphus/
+.omo/
 
 # AUTO-GENERATED DOCS --- DO NOT EDIT BELOW THIS LINE
 docs/abortMerge.md
