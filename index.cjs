@@ -11005,6 +11005,26 @@ async function _gc({ fs, cache, dir, gitdir = join(dir, '.git') }) {
 
 // @ts-check
 
+/**
+ * Consolidate loose objects and multiple packfiles into a single packfile
+ *
+ * Repeated fetches accumulate one packfile each, which makes every subsequent
+ * object lookup scan more indexes. This rewrites them into one.
+ *
+ * @param {object} args
+ * @param {FsClient} args.fs - a file system client
+ * @param {string} [args.dir] - The [working tree](dir-vs-gitdir.md) directory path
+ * @param {string} [args.gitdir=join(dir,'.git')] - [required] The [git directory](dir-vs-gitdir.md) path
+ * @param {object} [args.cache] - a [cache](cache.md) object
+ *
+ * @returns {Promise<{packsRemoved: number, objectsConsolidated: number}>} Resolves with what the consolidation removed and merged
+ *
+ * @example
+ * // Repack after a series of fetches.
+ * const { packsRemoved } = await git.gc({ fs, dir: '/tutorial' })
+ * console.log(packsRemoved)
+ *
+ */
 async function gc({ fs, dir, gitdir = join(dir, '.git'), cache = {} }) {
   try {
     assertParameter('fs', fs);

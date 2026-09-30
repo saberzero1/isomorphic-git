@@ -7,6 +7,7 @@ import {
   writeRefsAdResponse,
   writeUploadPackRequest,
   Errors,
+  pkg,
 } from 'isomorphic-git/internal-apis'
 // const stream = require('stream')
 
@@ -114,9 +115,14 @@ describe('git wire protocol', () => {
       },
     })
     const buffer = Buffer.from(await collect(res))
+    // The advertised agent carries this package's own version, so both the
+    // line and its pkt-length prefix are derived rather than pinned; hard
+    // coding them makes every version bump look like a wire regression.
+    const headLine = `9ea43b479f5fedc679e3eb37803275d727bf51b7 HEAD\0multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed no-done symref=HEAD:refs/heads/master agent=${pkg.agent}\n`
+    const headPkt =
+      (headLine.length + 4).toString(16).padStart(4, '0') + headLine
     expect(buffer.toString('utf8')).toBe(
-      `01149ea43b479f5fedc679e3eb37803275d727bf51b7 HEAD\0multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed no-done symref=HEAD:refs/heads/master agent=git/isomorphic-git@0.0.0-development
-003cfb74ea1a9b6a9601df18c38d3de751c51f064bf7 refs/heads/js2
+      `${headPkt}003cfb74ea1a9b6a9601df18c38d3de751c51f064bf7 refs/heads/js2
 003c5faa96fe725306e060386975a70e4b6eacb576ed refs/heads/js3
 003f9ea43b479f5fedc679e3eb37803275d727bf51b7 refs/heads/master
 0040c1751a5447a7b025e5bca507af483dde7b0b956f refs/heads/master2
@@ -335,6 +341,45 @@ access it.
 0032want e5c144897b64a44bd1164a0db60738452c9eaf87
 00000009done
 `)
+  })
+  it('writeUploadPackRequest with filter', async () => {
+    const req = {
+      capabilities: [
+        'multi_ack_detailed',
+        'no-done',
+        'side-band-64k',
+        'ofs-delta',
+        'agent=git/2.10.1.windows.1',
+        'filter',
+      ],
+      wants: ['fb74ea1a9b6a9601df18c38d3de751c51f064bf7'],
+      shallows: ['5faa96fe725306e060386975a70e4b6eacb576ed'],
+      depth: 1,
+      exclude: ['9ea43b479f5fedc679e3eb37803275d727bf51b7'],
+      filter: 'blob:none',
+    }
+    const result = writeUploadPackRequest(req)
+    const buffer = Buffer.from(await collect(result))
+    // Pins BOTH halves of the negotiation: `filter` must appear in the first
+    // want line's capability list, and the `filter blob:none` line must sit
+    // after deepen-not and before the flush. Either alone is silently ignored
+    // by the server, which then sends every blob.
+    expect(buffer.toString('utf8'))
+      .toEqual(`0087want fb74ea1a9b6a9601df18c38d3de751c51f064bf7 multi_ack_detailed no-done side-band-64k ofs-delta agent=git/2.10.1.windows.1 filter
+0035shallow 5faa96fe725306e060386975a70e4b6eacb576ed
+000ddeepen 1
+0038deepen-not 9ea43b479f5fedc679e3eb37803275d727bf51b7
+0015filter blob:none
+00000009done
+`)
+  })
+  it('writeUploadPackRequest omits the filter line by default', async () => {
+    const result = writeUploadPackRequest({
+      capabilities: ['ofs-delta'],
+      wants: ['fb74ea1a9b6a9601df18c38d3de751c51f064bf7'],
+    })
+    const buffer = Buffer.from(await collect(result))
+    expect(buffer.toString('utf8')).not.toContain('filter')
   })
   it('parseUploadPackRequest', async () => {
     const req = [

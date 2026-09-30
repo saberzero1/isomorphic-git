@@ -8,16 +8,16 @@ name: Publish
 # validates the calling workflow's name, not the one that actually runs the publish.
 #
 # ONE-TIME BOOTSTRAP — this workflow cannot perform the very first publish. npm requires a package
-# to exist before a trusted publisher can be attached to it, so publish 6.3.0 by hand once
+# to exist before a trusted publisher can be attached to it, so publish the first version by hand once
 # (`npm publish`, with 2FA), then on npmjs.com add a GitHub Actions trusted publisher with
-# organization `saberzero1`, repository `codemirror-vim`, workflow `publish.yml` (filename only,
+# organization `saberzero1`, repository `isomorphic-git`, workflow `publish.yml` (filename only,
 # no path), and no environment. Since 2026-09-03 a new publisher is not granted direct-publish
 # rights automatically — enable the `npm publish` action on it, or this workflow will only be
 # allowed to stage.
 
 on:
     push:
-        branches: [master]
+        branches: [main]
     workflow_dispatch:
 
 permissions:
@@ -93,37 +93,33 @@ jobs:
                   fi
                   echo "npm $actual, node $(node --version)"
 
-            # `yarn install` runs the package's own `prepare`, which is the build.
-            #
-            # NODE_AUTH_TOKEN is set to empty deliberately. `registry-url` above makes setup-node
-            # write an .npmrc containing a literal `${NODE_AUTH_TOKEN}` and point
-            # NPM_CONFIG_USERCONFIG at it. npm leaves that placeholder alone, but yarn 1 tries to
-            # expand it and aborts the whole install with "Failed to replace env in config" when
-            # the variable is unset — which it always is here, because trusted publishing uses no
-            # token. Defining it empty satisfies yarn's expansion; installing public packages
-            # needs no credential, and the publish step still authenticates over OIDC.
             - name: Install dependencies
-              run: yarn install --frozen-lockfile
+              run: npm ci
               env:
-                  NODE_AUTH_TOKEN: ''
+                  PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: true
+                  PUPPETEER_SKIP_DOWNLOAD: true
 
-            # The entry points in package.json all live under dist/, and a build that half-failed
-            # would otherwise publish a package that resolves to nothing.
+            # Built outputs are committed for GitHub URL installs, so a stale commit would
+            # otherwise publish whatever happened to be checked in. Rebuild here instead, and
+            # publish with --ignore-scripts below so `prepublishOnly` does not repeat it.
+            - name: Build
+              run: npx nps prepublish
+
+            # Every entry point in package.json sits at the repository root, not under dist/.
+            # A build that half-failed would publish a package that resolves to nothing.
             - name: Verify the build output
               shell: bash
               run: |
                   set -euo pipefail
-                  for file in dist/index.js dist/index.cjs dist/index.d.ts dist/index.d.cts; do
+                  for file in index.js index.cjs index.d.ts index.d.cts; do
                       test -s "$file" || { echo "missing or empty build output: $file" >&2; exit 1; }
                   done
 
             # No --provenance flag and no NODE_AUTH_TOKEN: under trusted publishing npm mints a
             # short-lived token from the OIDC claim and attaches provenance by itself.
             #
-            # --ignore-scripts because `prepare` shells out to yarn, and yarn cannot parse the
-            # .npmrc setup-node generated (see the install step). The install above already ran
-            # `prepare`, and the step above fails the job if it produced nothing, so the tarball
-            # is built and verified before this point — rebuilding here would only re-enter the
-            # same yarn failure. Do not drop this flag without also removing that .npmrc.
+            # --ignore-scripts because the Build step above already ran `prepublish`, and the
+            # verification step fails the job if it produced nothing. Without the flag npm would
+            # run the same build a second time during publish.
             - name: Publish ${{ needs.check.outputs.package }}
               run: npm publish --ignore-scripts

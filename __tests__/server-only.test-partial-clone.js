@@ -127,17 +127,19 @@ describe('partial clone', () => {
       ref: 'refs/remotes/origin/master',
     })
     const { commit } = await readCommit({ fs, gitdir, oid })
-    let blobOid
+    let found
     await walk({
       fs,
       dir,
       gitdir,
       trees: [TREE({ ref: commit.tree })],
       map: async (filepath, [entry]) => {
-        if (filepath === 'a.txt') blobOid = await entry.oid()
+        if (entry && filepath === 'a.txt') found = await entry.oid()
         return undefined
       },
     })
+    if (!found) throw new Error('a.txt is missing from the cloned tree')
+    const blobOid = found
 
     let err = null
     try {

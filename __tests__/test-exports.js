@@ -26,6 +26,7 @@ describe('exports', () => {
         "expandRef",
         "fastForward",
         "fetch",
+        "fetchObjects",
         "findMergeBase",
         "findRoot",
         "gc",

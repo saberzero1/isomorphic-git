@@ -83,19 +83,14 @@ jobs:
         shell: bash
         run: |
           # Run the subset of the `test` necessary to test from the CLI.
-          npx nps build.docs build.pack
-
-          # Warn when there are uncommitted changes to documentation
-          if ! git diff --quiet --exit-code; then
-            echo "::warning title=Uncommitted Changes to Documentation::There are uncommitted changes to the documentation. Please run \`nps build.docs\` and commit the changes."
-          fi
+          npx nps build.pack
 
       - name: Save npm-tarball.tgz
         if: ${{ !cancelled() && !github.event.pull_request.head.repo.fork }}
         uses: actions/upload-artifact@v4
         with:
           name: npm-tarball.tgz-${{ matrix.os }}
-          path: isomorphic-git-0.0.0-development.tgz
+          path: saberzero1-isomorphic-git-*.tgz
 
       - name: Save index.umd.min.js
         if: ${{ !cancelled() && !github.event.pull_request.head.repo.fork }}
