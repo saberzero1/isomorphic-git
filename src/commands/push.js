@@ -16,6 +16,7 @@ import { GitConfigManager } from '../managers/GitConfigManager.js'
 import { GitRefManager } from '../managers/GitRefManager.js'
 import { GitRemoteManager } from '../managers/GitRemoteManager.js'
 import { GitSideBand } from '../models/GitSideBand.js'
+import { hasObject } from '../storage/hasObject.js'
 import { addCredentialUsername } from '../utils/addCredentialUsername.js'
 import { filterCapabilities } from '../utils/filterCapabilities.js'
 import { forAwait } from '../utils/forAwait.js'
@@ -216,6 +217,8 @@ export async function _push({
       }
     }
 
+    await assertObjectsPresent({ fs, cache, gitdir, objects, thinPack })
+
     if (oid === oldoid) force = true
     if (!force) {
       // Is it a tag that already exists?
@@ -310,4 +313,42 @@ export async function _push({
       .join('')
     throw new GitPushError(prettyDetails, result)
   }
+}
+
+/**
+ * Fail loudly rather than packing objects this repository does not have.
+ *
+ * In a partial clone most blobs are intentionally absent, and they are excluded
+ * from the pack only because `skipObjects` subtracted everything reachable from
+ * the remote. That subtraction quietly produces nothing when the server sent
+ * `no-thin`, when `refs/remotes/<remote>/HEAD` did not resolve, or when the
+ * branch is new on the remote — and `_pack` would then try to read blobs that
+ * were never downloaded. Without this check the failure surfaces from deep
+ * inside pack serialization with no indication of why.
+ *
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {any} args.cache
+ * @param {string} args.gitdir
+ * @param {Set<string>} args.objects
+ * @param {boolean} args.thinPack
+ */
+async function assertObjectsPresent({ fs, cache, gitdir, objects, thinPack }) {
+  const missing = []
+  for (const oid of objects) {
+    if (!(await hasObject({ fs, cache, gitdir, oid }))) {
+      missing.push(oid)
+      if (missing.length >= 5) break
+    }
+  }
+  if (missing.length === 0) return
+
+  const reason = thinPack
+    ? 'the remote-tracking ref did not resolve, or the branch is new on the remote'
+    : "the remote advertised 'no-thin'"
+  throw new NotFoundError(
+    `${missing.length}+ object(s) needed for this push are missing locally ` +
+      `(e.g. ${missing[0]}). This repository is a partial clone and ${reason}, ` +
+      `so objects the remote already has could not be excluded from the pack.`
+  )
 }

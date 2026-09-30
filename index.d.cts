@@ -869,6 +869,7 @@ export function checkout({ fs, onProgress, onPostCheckout, dir, gitdir, remote, 
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Object<string, string>} [args.headers = {}] - Additional headers to include in HTTP requests, similar to git's `extraHeader` config
  * @param {object} [args.cache] - a [cache](cache.md) object
  * @param {boolean} [args.nonBlocking = false] - if true, checkout will happen non-blockingly (useful for long-running operations blocking the thread in browser environments)
@@ -889,7 +890,7 @@ export function checkout({ fs, onProgress, onPostCheckout, dir, gitdir, remote, 
  * console.log('done')
  *
  */
-export function clone({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, onAuthFailure, onPostCheckout, dir, gitdir, url, corsProxy, ref, remote, depth, since, exclude, relative, singleBranch, noCheckout, noTags, headers, cache, nonBlocking, batchSize, }: {
+export function clone({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, onAuthFailure, onPostCheckout, dir, gitdir, url, corsProxy, ref, remote, depth, since, exclude, relative, filter, singleBranch, noCheckout, noTags, headers, cache, nonBlocking, batchSize, }: {
     fs: FsClient;
     http: HttpClient;
     onProgress?: ProgressCallback | undefined;
@@ -911,6 +912,7 @@ export function clone({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, 
     since?: Date | undefined;
     exclude?: string[] | undefined;
     relative?: boolean | undefined;
+    filter?: string | undefined;
     headers?: {
         [x: string]: string;
     } | undefined;
@@ -1042,6 +1044,7 @@ declare namespace index {
     export { expandRef };
     export { fastForward };
     export { fetch };
+    export { fetchObjects };
     export { findMergeBase };
     export { findRoot };
     export { getRemoteInfo };
@@ -1281,6 +1284,7 @@ export function fastForward({ fs, http, onProgress, onMessage, onAuth, onAuthSuc
  * @param {boolean} [args.tags = false] - Also fetch tags
  * @param {number} [args.depth] - Integer. Determines how much of the git repository's history to retrieve
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.prune = false] - Delete local remote-tracking branches that are not present on the remote
@@ -1307,7 +1311,7 @@ export function fastForward({ fs, http, onProgress, onMessage, onAuth, onAuthSuc
  * console.log(result)
  *
  */
-export function fetch({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, onAuthFailure, dir, gitdir, ref, remote, remoteRef, url, corsProxy, depth, since, exclude, relative, tags, singleBranch, headers, prune, pruneTags, cache, }: {
+export function fetch({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, onAuthFailure, dir, gitdir, ref, remote, remoteRef, url, corsProxy, depth, since, exclude, relative, filter, tags, singleBranch, headers, prune, pruneTags, cache, }: {
     fs: FsClient;
     http: HttpClient;
     onProgress?: ProgressCallback | undefined;
@@ -1325,6 +1329,7 @@ export function fetch({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, 
     tags?: boolean | undefined;
     depth?: number | undefined;
     relative?: boolean | undefined;
+    filter?: string | undefined;
     since?: Date | undefined;
     exclude?: string[] | undefined;
     prune?: boolean | undefined;
@@ -1335,6 +1340,62 @@ export function fetch({ fs, http, onProgress, onMessage, onAuth, onAuthSuccess, 
     } | undefined;
     cache?: object;
 }): Promise<FetchResult>;
+/**
+ * Fetch specific objects by oid, to backfill a partial (blobless) clone.
+ *
+ * Only adds objects to the object database: refs, shallow state and FETCH_HEAD
+ * are left untouched. The remote must advertise `allow-reachable-sha1-in-want`,
+ * since a filtered-out blob is never at a ref tip; otherwise this throws
+ * `RemoteCapabilityError`.
+ *
+ * Pass every oid you need in one call — the server answers a multi-want request
+ * in a single round trip.
+ *
+ * @param {object} args
+ * @param {FsClient} args.fs - a file system client
+ * @param {HttpClient} args.http - an HTTP client
+ * @param {ProgressCallback} [args.onProgress] - optional progress event callback
+ * @param {AuthCallback} [args.onAuth] - optional auth fill callback
+ * @param {AuthFailureCallback} [args.onAuthFailure] - optional auth rejected callback
+ * @param {AuthSuccessCallback} [args.onAuthSuccess] - optional auth approved callback
+ * @param {string} [args.dir] - The [working tree](dir-vs-gitdir.md) directory path
+ * @param {string} [args.gitdir=join(dir,'.git')] - [required] The [git directory](dir-vs-gitdir.md) path
+ * @param {string[]} args.oids - The SHA-1 object ids to fetch
+ * @param {string} [args.remote='origin'] - Which remote to fetch from
+ * @param {string} [args.url] - Overrides the remote's configured url
+ * @param {string} [args.corsProxy] - Optional CORS proxy
+ * @param {Object<string, string>} [args.headers] - Additional headers
+ * @param {object} [args.cache] - a [cache](cache.md) object
+ *
+ * @returns {Promise<{packfile: string | undefined}>} Path of the written pack, if any
+ *
+ * @example
+ * await git.fetchObjects({
+ *   fs, http, dir: '/tutorial',
+ *   oids: ['a1b2c3...', 'd4e5f6...']
+ * })
+ *
+ */
+export function fetchObjects({ fs, http, onProgress, onAuth, onAuthSuccess, onAuthFailure, dir, gitdir, oids, remote, url, corsProxy, headers, cache, }: {
+    fs: FsClient;
+    http: HttpClient;
+    onProgress?: ProgressCallback | undefined;
+    onAuth?: AuthCallback | undefined;
+    onAuthFailure?: AuthFailureCallback | undefined;
+    onAuthSuccess?: AuthSuccessCallback | undefined;
+    dir?: string | undefined;
+    gitdir?: string | undefined;
+    oids: string[];
+    remote?: string | undefined;
+    url?: string | undefined;
+    corsProxy?: string | undefined;
+    headers?: {
+        [x: string]: string;
+    } | undefined;
+    cache?: object;
+}): Promise<{
+    packfile: string | undefined;
+}>;
 /**
  * Find the merge base for a set of commits
  *

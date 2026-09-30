@@ -18,12 +18,13 @@ import { expandOid } from './api/expandOid.js'
 import { expandRef } from './api/expandRef.js'
 import { fastForward } from './api/fastForward.js'
 import { fetch } from './api/fetch.js'
+import { fetchObjects } from './api/fetchObjects.js'
 import { findMergeBase } from './api/findMergeBase.js'
 import { findRoot } from './api/findRoot.js'
+import { gc } from './api/gc.js'
 import { getConfig } from './api/getConfig.js'
 import { getConfigAll } from './api/getConfigAll.js'
 import { getRemoteInfo } from './api/getRemoteInfo.js'
-import { gc } from './api/gc.js'
 import { hashBlob } from './api/hashBlob.js'
 import { indexPack } from './api/indexPack.js'
 import { init } from './api/init.js'
@@ -84,6 +85,7 @@ export {
   expandRef,
   fastForward,
   fetch,
+  fetchObjects,
   findMergeBase,
   findRoot,
   getRemoteInfo,
@@ -147,6 +149,7 @@ export default {
   expandRef,
   fastForward,
   fetch,
+  fetchObjects,
   findMergeBase,
   findRoot,
   getRemoteInfo,

@@ -31,6 +31,7 @@ import { GitConfigManager } from '../managers/GitConfigManager.js'
  * @param {Date} args.since
  * @param {string[]} args.exclude
  * @param {boolean} args.relative
+ * @param {string} [args.filter]
  * @param {Object<string, string>} args.headers
  * @param {boolean} [args.nonBlocking]
  * @param {number} [args.batchSize]
@@ -58,6 +59,7 @@ export async function _clone({
   since,
   exclude,
   relative,
+  filter,
   singleBranch,
   noCheckout,
   noTags,
@@ -90,6 +92,7 @@ export async function _clone({
       since,
       exclude,
       relative,
+      filter,
       singleBranch,
       headers,
       tags: !noTags,

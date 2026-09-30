@@ -7637,8 +7637,8 @@ function filterCapabilities(server, client) {
 
 const pkg = {
   name: 'isomorphic-git',
-  version: '0.0.0-development',
-  agent: 'git/isomorphic-git@0.0.0-development',
+  version: '0.0.1',
+  agent: 'git/isomorphic-git@0.0.1',
 };
 
 class FIFO {
@@ -7931,6 +7931,7 @@ function writeUploadPackRequest({
   depth = null,
   since = null,
   exclude = [],
+  filter = null,
 }) {
   const packstream = [];
   wants = [...new Set(wants)]; // remove duplicates
@@ -7952,6 +7953,13 @@ function writeUploadPackRequest({
   }
   for (const oid of exclude) {
     packstream.push(GitPktLine.encode(`deepen-not ${oid}\n`));
+  }
+  // upload-request = want-list *shallow-line *1depth-request [filter-request] flush-pkt
+  // Position is load-bearing, and so is the matching 'filter' capability on the
+  // first want line: without it the server may accept this line and ignore it,
+  // returning every blob while appearing to succeed.
+  if (filter !== null) {
+    packstream.push(GitPktLine.encode(`filter ${filter}\n`));
   }
   packstream.push(GitPktLine.flush());
   for (const oid of haves) {
@@ -7999,6 +8007,7 @@ function writeUploadPackRequest({
  * @param {Object<string, string>} [args.headers]
  * @param {boolean} [args.prune]
  * @param {boolean} [args.pruneTags]
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`
  *
  * @returns {Promise<FetchResult>}
  * @see FetchResult
@@ -8027,6 +8036,7 @@ async function _fetch({
   headers = {},
   prune = false,
   pruneTags = false,
+  filter = null,
 }) {
   const ref = _ref || (await _currentBranch({ fs, gitdir, test: true }));
   const config = await GitConfigManager.get({ fs, gitdir });
@@ -8084,6 +8094,9 @@ async function _fetch({
   if (relative === true && !remoteHTTP.capabilities.has('deepen-relative')) {
     throw new RemoteCapabilityError('deepen-relative', 'relative')
   }
+  if (filter !== null && !remoteHTTP.capabilities.has('filter')) {
+    throw new RemoteCapabilityError('filter', 'filter')
+  }
   // Figure out the SHA for the requested ref
   const { oid, fullref } = GitRefManager.resolveAgainstMap({
     ref: remoteRef,
@@ -8115,6 +8128,8 @@ async function _fetch({
       // canonical git it turns out is NOT.
       'ofs-delta',
       `agent=${pkg.agent}`,
+      // Conditional so unfiltered fetches keep their exact capability list.
+      ...(filter !== null ? ['filter'] : []),
     ]
   );
   if (relative) capabilities.push('deepen-relative');
@@ -8150,6 +8165,7 @@ async function _fetch({
     depth,
     since,
     exclude,
+    filter,
   });
   // CodeCommit will hang up if we don't send a Content-Length header
   // so we can't stream the body.
@@ -8313,8 +8329,34 @@ async function _fetch({
       onProgress,
     });
     await fs.write(fullpath.replace(/\.pack$/, '.idx'), await idx.toBuffer());
+    if (filter !== null) {
+      await fs.write(fullpath.replace(/\.pack$/, '.promisor'), '');
+      await markRepoPartial({ fs, gitdir, remote, filter });
+    }
   }
   return res
+}
+
+/**
+ * Record that this repository is missing objects on purpose, which is what
+ * licenses the lazy fetch in readObject to treat an absent blob as fetchable
+ * rather than corrupt.
+ *
+ * `extensions.partialclone` holds the promisor *remote name*, not the filter.
+ *
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {string} args.gitdir
+ * @param {string} args.remote
+ * @param {string} args.filter
+ */
+async function markRepoPartial({ fs, gitdir, remote, filter }) {
+  const config = await GitConfigManager.get({ fs, gitdir });
+  await config.set('core.repositoryformatversion', '1');
+  await config.set('extensions.partialclone', remote);
+  await config.set(`remote.${remote}.promisor`, 'true');
+  await config.set(`remote.${remote}.partialclonefilter`, filter);
+  await GitConfigManager.save({ fs, gitdir, config });
 }
 
 // @ts-check
@@ -8392,6 +8434,7 @@ async function _init({
  * @param {Date} args.since
  * @param {string[]} args.exclude
  * @param {boolean} args.relative
+ * @param {string} [args.filter]
  * @param {Object<string, string>} args.headers
  * @param {boolean} [args.nonBlocking]
  * @param {number} [args.batchSize]
@@ -8419,6 +8462,7 @@ async function _clone({
   since,
   exclude,
   relative,
+  filter,
   singleBranch,
   noCheckout,
   noTags,
@@ -8451,6 +8495,7 @@ async function _clone({
       since,
       exclude,
       relative,
+      filter,
       singleBranch,
       headers,
       tags: !noTags,
@@ -8510,6 +8555,7 @@ async function _clone({
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Object<string, string>} [args.headers = {}] - Additional headers to include in HTTP requests, similar to git's `extraHeader` config
  * @param {object} [args.cache] - a [cache](cache.md) object
  * @param {boolean} [args.nonBlocking = false] - if true, checkout will happen non-blockingly (useful for long-running operations blocking the thread in browser environments)
@@ -8549,6 +8595,7 @@ async function clone({
   since = undefined,
   exclude = [],
   relative = false,
+  filter = null,
   singleBranch = false,
   noCheckout = false,
   noTags = false,
@@ -8588,6 +8635,7 @@ async function clone({
       since,
       exclude,
       relative,
+      filter,
       singleBranch,
       noCheckout,
       noTags,
@@ -10367,6 +10415,7 @@ async function fastForward({
  * @param {boolean} [args.tags = false] - Also fetch tags
  * @param {number} [args.depth] - Integer. Determines how much of the git repository's history to retrieve
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.prune = false] - Delete local remote-tracking branches that are not present on the remote
@@ -10412,6 +10461,7 @@ async function fetch({
   since = null,
   exclude = [],
   relative = false,
+  filter = null,
   tags = false,
   singleBranch = false,
   headers = {},
@@ -10445,6 +10495,7 @@ async function fetch({
       since,
       exclude,
       relative,
+      filter,
       tags,
       singleBranch,
       headers,
@@ -10453,6 +10504,219 @@ async function fetch({
     })
   } catch (err) {
     err.caller = 'git.fetch';
+    throw err
+  }
+}
+
+// @ts-check
+
+/**
+ * Fetch specific objects by oid, for backfilling a partial clone.
+ *
+ * Unlike `_fetch` this never touches refs, shallow state or FETCH_HEAD — it
+ * only adds objects to the object database. Pass every oid you need at once:
+ * the server handles a multi-want request in a single round trip, and issuing
+ * one request per object is the difference between one fetch and N.
+ *
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {any} args.cache
+ * @param {HttpClient} args.http
+ * @param {ProgressCallback} [args.onProgress]
+ * @param {AuthCallback} [args.onAuth]
+ * @param {AuthFailureCallback} [args.onAuthFailure]
+ * @param {AuthSuccessCallback} [args.onAuthSuccess]
+ * @param {string} args.gitdir
+ * @param {string[]} args.oids
+ * @param {string} [args.remote]
+ * @param {string} [args.url]
+ * @param {string} [args.corsProxy]
+ * @param {Object<string, string>} [args.headers]
+ *
+ * @returns {Promise<{ packfile: string | undefined }>}
+ */
+async function _fetchObjects({
+  fs,
+  cache,
+  http,
+  onProgress,
+  onAuth,
+  onAuthSuccess,
+  onAuthFailure,
+  gitdir,
+  oids,
+  remote: _remote,
+  url: _url,
+  corsProxy,
+  headers = {},
+}) {
+  if (!oids || oids.length === 0) return { packfile: undefined }
+
+  const config = await GitConfigManager.get({ fs, gitdir });
+  const remote = _remote || 'origin';
+  const url = _url || (await config.get(`remote.${remote}.url`));
+  if (typeof url === 'undefined') {
+    throw new MissingParameterError('remote OR url')
+  }
+  if (corsProxy === undefined) {
+    corsProxy = await config.get('http.corsProxy');
+  }
+
+  const GitRemoteHTTP = GitRemoteManager.getRemoteHelperFor({ url });
+  const remoteHTTP = await GitRemoteHTTP.discover({
+    http,
+    onAuth: addCredentialUsername({ config, onAuth }),
+    onAuthSuccess,
+    onAuthFailure: addCredentialUsername({ config, onAuth: onAuthFailure }),
+    corsProxy,
+    service: 'git-upload-pack',
+    url,
+    headers,
+    protocolVersion: 1,
+  });
+
+  // A promisor blob is not at a ref tip, so allow-tip-sha1-in-want is not
+  // enough — the server must accept any oid reachable from one.
+  if (
+    !remoteHTTP.capabilities.has('allow-reachable-sha1-in-want') &&
+    !remoteHTTP.capabilities.has('allow-any-sha1-in-want')
+  ) {
+    throw new RemoteCapabilityError('allow-reachable-sha1-in-want', 'oids')
+  }
+
+  const capabilities = filterCapabilities(
+    [...remoteHTTP.capabilities],
+    [
+      'multi_ack_detailed',
+      'no-done',
+      'side-band-64k',
+      'ofs-delta',
+      `agent=${pkg.agent}`,
+    ]
+  );
+
+  const packstream = writeUploadPackRequest({
+    capabilities,
+    wants: [...new Set(oids)],
+    haves: [],
+  });
+  const packbuffer = Buffer.from(await collect(packstream));
+  const raw = await GitRemoteHTTP.connect({
+    http,
+    onProgress,
+    corsProxy,
+    service: 'git-upload-pack',
+    url,
+    auth: remoteHTTP.auth,
+    body: [packbuffer],
+    headers,
+  });
+  const response = await parseUploadPackResponse(raw.body);
+  const packfile = Buffer.from(await collect(response.packfile));
+  if (raw.body.error) throw raw.body.error
+
+  const packfileSha = packfile.slice(-20).toString('hex');
+  if (packfileSha === '' || emptyPackfile(packfile)) {
+    return { packfile: undefined }
+  }
+
+  const relative = `objects/pack/pack-${packfileSha}.pack`;
+  const fullpath = join(gitdir, relative);
+  await fs.write(fullpath, packfile);
+  const getExternalRefDelta = oid => _readObject({ fs, cache, gitdir, oid });
+  const idx = await GitPackIndex.fromPack({
+    pack: packfile,
+    getExternalRefDelta,
+    onProgress,
+  });
+  await fs.write(fullpath.replace(/\.pack$/, '.idx'), await idx.toBuffer());
+  // Backfilled objects are still only-what-was-asked-for, so this pack is as
+  // promisor as the original: without the marker a later integrity check would
+  // read the repo as complete.
+  await fs.write(fullpath.replace(/\.pack$/, '.promisor'), '');
+
+  return { packfile: relative }
+}
+
+// @ts-check
+
+/**
+ * Fetch specific objects by oid, to backfill a partial (blobless) clone.
+ *
+ * Only adds objects to the object database: refs, shallow state and FETCH_HEAD
+ * are left untouched. The remote must advertise `allow-reachable-sha1-in-want`,
+ * since a filtered-out blob is never at a ref tip; otherwise this throws
+ * `RemoteCapabilityError`.
+ *
+ * Pass every oid you need in one call — the server answers a multi-want request
+ * in a single round trip.
+ *
+ * @param {object} args
+ * @param {FsClient} args.fs - a file system client
+ * @param {HttpClient} args.http - an HTTP client
+ * @param {ProgressCallback} [args.onProgress] - optional progress event callback
+ * @param {AuthCallback} [args.onAuth] - optional auth fill callback
+ * @param {AuthFailureCallback} [args.onAuthFailure] - optional auth rejected callback
+ * @param {AuthSuccessCallback} [args.onAuthSuccess] - optional auth approved callback
+ * @param {string} [args.dir] - The [working tree](dir-vs-gitdir.md) directory path
+ * @param {string} [args.gitdir=join(dir,'.git')] - [required] The [git directory](dir-vs-gitdir.md) path
+ * @param {string[]} args.oids - The SHA-1 object ids to fetch
+ * @param {string} [args.remote='origin'] - Which remote to fetch from
+ * @param {string} [args.url] - Overrides the remote's configured url
+ * @param {string} [args.corsProxy] - Optional CORS proxy
+ * @param {Object<string, string>} [args.headers] - Additional headers
+ * @param {object} [args.cache] - a [cache](cache.md) object
+ *
+ * @returns {Promise<{packfile: string | undefined}>} Path of the written pack, if any
+ *
+ * @example
+ * await git.fetchObjects({
+ *   fs, http, dir: '/tutorial',
+ *   oids: ['a1b2c3...', 'd4e5f6...']
+ * })
+ *
+ */
+async function fetchObjects({
+  fs,
+  http,
+  onProgress,
+  onAuth,
+  onAuthSuccess,
+  onAuthFailure,
+  dir,
+  gitdir = join(dir, '.git'),
+  oids,
+  remote,
+  url,
+  corsProxy,
+  headers = {},
+  cache = {},
+}) {
+  try {
+    assertParameter('fs', fs);
+    assertParameter('http', http);
+    assertParameter('gitdir', gitdir);
+    assertParameter('oids', oids);
+
+    const fsp = new FileSystem(fs);
+    const updatedGitdir = await discoverGitdir({ fsp, dotgit: gitdir });
+    return await _fetchObjects({
+      fs: fsp,
+      cache,
+      http,
+      onProgress,
+      onAuth,
+      onAuthSuccess,
+      onAuthFailure,
+      gitdir: updatedGitdir,
+      oids,
+      remote,
+      url,
+      corsProxy,
+      headers,
+    })
+  } catch (err) {
+    err.caller = 'git.fetchObjects';
     throw err
   }
 }
@@ -10551,6 +10815,192 @@ async function findRoot({ fs, filepath }) {
     return await _findRoot({ fs: new FileSystem(fs), filepath })
   } catch (err) {
     err.caller = 'git.findRoot';
+    throw err
+  }
+}
+
+/**
+ * @enum {number}
+ */
+const types = {
+  commit: 0b0010000,
+  tree: 0b0100000,
+  blob: 0b0110000,
+  tag: 0b1000000,
+  ofs_delta: 0b1100000,
+  ref_delta: 0b1110000,
+};
+
+/**
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {any} args.cache
+ * @param {string} [args.dir] - The [working tree](dir-vs-gitdir.md) directory path
+ * @param {string} [args.gitdir=join(dir, '.git')] - [required] The [git directory](dir-vs-gitdir.md) path
+ * @param {string[]} args.oids
+ */
+async function _pack({
+  fs,
+  cache,
+  dir,
+  gitdir = join(dir, '.git'),
+  oids,
+}) {
+  const hash = new Hash();
+  const outputStream = [];
+  function write(chunk, enc) {
+    const buff = Buffer.from(chunk, enc);
+    outputStream.push(buff);
+    hash.update(buff);
+  }
+  async function writeObject({ stype, object }) {
+    // Object type is encoded in bits 654
+    const type = types[stype];
+    // The length encoding gets complicated.
+    let length = object.length;
+    // Whether the next byte is part of the variable-length encoded number
+    // is encoded in bit 7
+    let multibyte = length > 0b1111 ? 0b10000000 : 0b0;
+    // Last four bits of length is encoded in bits 3210
+    const lastFour = length & 0b1111;
+    // Discard those bits
+    length = length >>> 4;
+    // The first byte is then (1-bit multibyte?), (3-bit type), (4-bit least sig 4-bits of length)
+    let byte = (multibyte | type | lastFour).toString(16);
+    write(byte, 'hex');
+    // Now we keep chopping away at length 7-bits at a time until its zero,
+    // writing out the bytes in what amounts to little-endian order.
+    while (multibyte) {
+      multibyte = length > 0b01111111 ? 0b10000000 : 0b0;
+      byte = multibyte | (length & 0b01111111);
+      write(padHex(2, byte), 'hex');
+      length = length >>> 7;
+    }
+    // Lastly, we can compress and write the object.
+    write(Buffer.from(await deflate(object)));
+  }
+  write('PACK');
+  write('00000002', 'hex');
+  // Write a 4 byte (32-bit) int
+  write(padHex(8, oids.length), 'hex');
+  for (const oid of oids) {
+    const { type, object } = await _readObject({ fs, cache, gitdir, oid });
+    await writeObject({ write, object, stype: type });
+  }
+  // Write SHA1 checksum
+  const digest = hash.digest();
+  outputStream.push(digest);
+  return outputStream
+}
+
+// @ts-check
+
+/**
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {any} args.cache
+ * @param {string} [args.dir]
+ * @param {string} [args.gitdir=join(dir, '.git')]
+ *
+ * @returns {Promise<{packsRemoved: number, objectsConsolidated: number}>}
+ */
+async function _gc({ fs, cache, dir, gitdir = join(dir, '.git') }) {
+  const packDir = join(gitdir, 'objects/pack');
+  const list = await fs.readdir(packDir);
+  const pairsByBase = new Map();
+
+  for (const entry of list) {
+    if (!entry.endsWith('.pack') && !entry.endsWith('.idx')) continue
+    const base = entry.replace(/\.(pack|idx)$/, '');
+    if (!pairsByBase.has(base)) {
+      pairsByBase.set(base, { base, pack: null, idx: null });
+    }
+    const pair = pairsByBase.get(base);
+    if (entry.endsWith('.pack')) pair.pack = entry;
+    if (entry.endsWith('.idx')) pair.idx = entry;
+  }
+
+  const packPairs = [...pairsByBase.values()].filter(
+    pair => pair.pack && pair.idx
+  );
+
+  if (packPairs.length <= 1) {
+    return { packsRemoved: 0, objectsConsolidated: 0 }
+  }
+
+  const getExternalRefDelta = oid => _readObject({ fs, cache, gitdir, oid });
+
+  const oids = new Set();
+  for (const pair of packPairs) {
+    const indexFile = join(packDir, pair.idx);
+    const p = await readPackIndex({
+      fs,
+      cache,
+      filename: indexFile,
+      getExternalRefDelta,
+    });
+    for (const oid of p.hashes) {
+      oids.add(oid);
+    }
+  }
+
+  const oidsArray = Array.from(oids);
+  const packChunks = await _pack({ fs, cache, gitdir, oids: oidsArray });
+  const packData = await collect(packChunks);
+  const packBuffer = Buffer.from(packData);
+  const packSha = packBuffer.slice(-20).toString('hex');
+  const packBase = `pack-${packSha}`;
+  const packPath = join(packDir, `${packBase}.pack`);
+  const idxPath = join(packDir, `${packBase}.idx`);
+
+  await fs.write(packPath, packBuffer);
+
+  const idx = await GitPackIndex.fromPack({
+    pack: packBuffer,
+    getExternalRefDelta,
+  });
+  await fs.write(idxPath, await idx.toBuffer());
+
+  const sampleOids = oidsArray.slice(0, 3);
+  for (const oid of sampleOids) {
+    const result = await readObjectPacked({
+      fs,
+      cache,
+      gitdir,
+      oid,
+      getExternalRefDelta,
+    });
+    if (!result) {
+      throw new Error(`Packed object ${oid} missing after gc`)
+    }
+  }
+
+  let packsRemoved = 0;
+  for (const pair of packPairs) {
+    if (pair.base === packBase) continue
+    await fs.rm(join(packDir, pair.pack));
+    await fs.rm(join(packDir, pair.idx));
+    packsRemoved++;
+  }
+
+  if (cache && cache[PackfileCache]) {
+    delete cache[PackfileCache];
+  }
+
+  return { packsRemoved, objectsConsolidated: oidsArray.length }
+}
+
+// @ts-check
+
+async function gc({ fs, dir, gitdir = join(dir, '.git'), cache = {} }) {
+  try {
+    assertParameter('fs', fs);
+    assertParameter('gitdir', gitdir);
+    const fsp = new FileSystem(fs);
+    const updatedGitdir = await discoverGitdir({ fsp, dotgit: gitdir });
+    return await _gc({ fs: fsp, cache, gitdir: updatedGitdir })
+  } catch (err) {
+    err.caller = 'git.gc';
     throw err
   }
 }
@@ -10760,189 +11210,6 @@ async function getRemoteInfo({
     return result
   } catch (err) {
     err.caller = 'git.getRemoteInfo';
-    throw err
-  }
-}
-
-/**
- * @enum {number}
- */
-const types = {
-  commit: 0b0010000,
-  tree: 0b0100000,
-  blob: 0b0110000,
-  tag: 0b1000000,
-  ofs_delta: 0b1100000,
-  ref_delta: 0b1110000,
-};
-
-/**
- * @param {object} args
- * @param {import('../models/FileSystem.js').FileSystem} args.fs
- * @param {any} args.cache
- * @param {string} [args.dir] - The [working tree](dir-vs-gitdir.md) directory path
- * @param {string} [args.gitdir=join(dir, '.git')] - [required] The [git directory](dir-vs-gitdir.md) path
- * @param {string[]} args.oids
- */
-async function _pack({
-  fs,
-  cache,
-  dir,
-  gitdir = join(dir, '.git'),
-  oids,
-}) {
-  const hash = new Hash();
-  const outputStream = [];
-  function write(chunk, enc) {
-    const buff = Buffer.from(chunk, enc);
-    outputStream.push(buff);
-    hash.update(buff);
-  }
-  async function writeObject({ stype, object }) {
-    // Object type is encoded in bits 654
-    const type = types[stype];
-    // The length encoding gets complicated.
-    let length = object.length;
-    // Whether the next byte is part of the variable-length encoded number
-    // is encoded in bit 7
-    let multibyte = length > 0b1111 ? 0b10000000 : 0b0;
-    // Last four bits of length is encoded in bits 3210
-    const lastFour = length & 0b1111;
-    // Discard those bits
-    length = length >>> 4;
-    // The first byte is then (1-bit multibyte?), (3-bit type), (4-bit least sig 4-bits of length)
-    let byte = (multibyte | type | lastFour).toString(16);
-    write(byte, 'hex');
-    // Now we keep chopping away at length 7-bits at a time until its zero,
-    // writing out the bytes in what amounts to little-endian order.
-    while (multibyte) {
-      multibyte = length > 0b01111111 ? 0b10000000 : 0b0;
-      byte = multibyte | (length & 0b01111111);
-      write(padHex(2, byte), 'hex');
-      length = length >>> 7;
-    }
-    // Lastly, we can compress and write the object.
-    write(Buffer.from(await deflate(object)));
-  }
-  write('PACK');
-  write('00000002', 'hex');
-  // Write a 4 byte (32-bit) int
-  write(padHex(8, oids.length), 'hex');
-  for (const oid of oids) {
-    const { type, object } = await _readObject({ fs, cache, gitdir, oid });
-    await writeObject({ write, object, stype: type });
-  }
-  // Write SHA1 checksum
-  const digest = hash.digest();
-  outputStream.push(digest);
-  return outputStream
-}
-
-// @ts-check
-
-/**
- * @param {object} args
- * @param {import('../models/FileSystem.js').FileSystem} args.fs
- * @param {any} args.cache
- * @param {string} [args.dir]
- * @param {string} [args.gitdir=join(dir, '.git')]
- *
- * @returns {Promise<{packsRemoved: number, objectsConsolidated: number}>}
- */
-async function _gc({ fs, cache, dir, gitdir = join(dir, '.git') }) {
-  const packDir = join(gitdir, 'objects/pack');
-  const list = await fs.readdir(packDir);
-  const pairsByBase = new Map();
-
-  for (const entry of list) {
-    if (!entry.endsWith('.pack') && !entry.endsWith('.idx')) continue
-    const base = entry.replace(/\.(pack|idx)$/, '');
-    if (!pairsByBase.has(base)) {
-      pairsByBase.set(base, { base, pack: null, idx: null });
-    }
-    const pair = pairsByBase.get(base);
-    if (entry.endsWith('.pack')) pair.pack = entry;
-    if (entry.endsWith('.idx')) pair.idx = entry;
-  }
-
-  const packPairs = [...pairsByBase.values()].filter(
-    pair => pair.pack && pair.idx
-  );
-
-  if (packPairs.length <= 1) {
-    return { packsRemoved: 0, objectsConsolidated: 0 }
-  }
-
-  const getExternalRefDelta = oid => _readObject({ fs, cache, gitdir, oid });
-
-  const oids = new Set();
-  for (const pair of packPairs) {
-    const indexFile = join(packDir, pair.idx);
-    const p = await readPackIndex({
-      fs,
-      cache,
-      filename: indexFile,
-      getExternalRefDelta,
-    });
-    for (const oid of p.hashes) {
-      oids.add(oid);
-    }
-  }
-
-  const oidsArray = Array.from(oids);
-  const packChunks = await _pack({ fs, cache, gitdir, oids: oidsArray });
-  const packData = await collect(packChunks);
-  const packBuffer = Buffer.from(packData);
-  const packSha = packBuffer.slice(-20).toString('hex');
-  const packBase = `pack-${packSha}`;
-  const packPath = join(packDir, `${packBase}.pack`);
-  const idxPath = join(packDir, `${packBase}.idx`);
-
-  await fs.write(packPath, packBuffer);
-
-  const idx = await GitPackIndex.fromPack({ pack: packBuffer, getExternalRefDelta });
-  await fs.write(idxPath, await idx.toBuffer());
-
-  const sampleOids = oidsArray.slice(0, 3);
-  for (const oid of sampleOids) {
-    const result = await readObjectPacked({
-      fs,
-      cache,
-      gitdir,
-      oid,
-      getExternalRefDelta,
-    });
-    if (!result) {
-      throw new Error(`Packed object ${oid} missing after gc`)
-    }
-  }
-
-  let packsRemoved = 0;
-  for (const pair of packPairs) {
-    if (pair.base === packBase) continue
-    await fs.rm(join(packDir, pair.pack));
-    await fs.rm(join(packDir, pair.idx));
-    packsRemoved++;
-  }
-
-  if (cache && cache[PackfileCache]) {
-    delete cache[PackfileCache];
-  }
-
-  return { packsRemoved, objectsConsolidated: oidsArray.length }
-}
-
-// @ts-check
-
-async function gc({ fs, dir, gitdir = join(dir, '.git'), cache = {} }) {
-  try {
-    assertParameter('fs', fs);
-    assertParameter('gitdir', gitdir);
-    const fsp = new FileSystem(fs);
-    const updatedGitdir = await discoverGitdir({ fsp, dotgit: gitdir });
-    return await _gc({ fs: fsp, cache, gitdir: updatedGitdir })
-  } catch (err) {
-    err.caller = 'git.gc';
     throw err
   }
 }
@@ -13122,6 +13389,8 @@ async function _push({
       }
     }
 
+    await assertObjectsPresent({ fs, cache, gitdir, objects, thinPack });
+
     if (oid === oldoid) force = true;
     if (!force) {
       // Is it a tag that already exists?
@@ -13216,6 +13485,44 @@ async function _push({
       .join('');
     throw new GitPushError(prettyDetails, result)
   }
+}
+
+/**
+ * Fail loudly rather than packing objects this repository does not have.
+ *
+ * In a partial clone most blobs are intentionally absent, and they are excluded
+ * from the pack only because `skipObjects` subtracted everything reachable from
+ * the remote. That subtraction quietly produces nothing when the server sent
+ * `no-thin`, when `refs/remotes/<remote>/HEAD` did not resolve, or when the
+ * branch is new on the remote — and `_pack` would then try to read blobs that
+ * were never downloaded. Without this check the failure surfaces from deep
+ * inside pack serialization with no indication of why.
+ *
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {any} args.cache
+ * @param {string} args.gitdir
+ * @param {Set<string>} args.objects
+ * @param {boolean} args.thinPack
+ */
+async function assertObjectsPresent({ fs, cache, gitdir, objects, thinPack }) {
+  const missing = [];
+  for (const oid of objects) {
+    if (!(await hasObject({ fs, cache, gitdir, oid }))) {
+      missing.push(oid);
+      if (missing.length >= 5) break
+    }
+  }
+  if (missing.length === 0) return
+
+  const reason = thinPack
+    ? 'the remote-tracking ref did not resolve, or the branch is new on the remote'
+    : "the remote advertised 'no-thin'";
+  throw new NotFoundError(
+    `${missing.length}+ object(s) needed for this push are missing locally ` +
+      `(e.g. ${missing[0]}). This repository is a partial clone and ${reason}, ` +
+      `so objects the remote already has could not be excluded from the pack.`
+  )
 }
 
 // @ts-check
@@ -15411,6 +15718,7 @@ var index = {
   expandRef,
   fastForward,
   fetch,
+  fetchObjects,
   findMergeBase,
   findRoot,
   getRemoteInfo,
@@ -15451,4 +15759,4 @@ var index = {
 };
 
 export default index;
-export { Errors, STAGE, TREE, WORKDIR, abortMerge, add, addRemote, branch, checkout, clone, commit, currentBranch, deleteBranch, deleteRef, deleteRemote, expandOid, expandRef, fastForward, fetch, findMergeBase, findRoot, gc, getConfig, getConfigAll, getRemoteInfo, hashBlob, indexPack, init, isDescendent, isIgnored, listBranches, listFiles, listRefs, listRemotes, listServerRefs, listTags, log, merge, packObjects, pull, push, readBlob, readCommit, readObject, readTree, remove, resetIndex, resolveRef, setConfig, status, statusMatrix, updateIndex$1 as updateIndex, version, walk, writeBlob, writeCommit, writeObject, writeRef, writeTree };
+export { Errors, STAGE, TREE, WORKDIR, abortMerge, add, addRemote, branch, checkout, clone, commit, currentBranch, deleteBranch, deleteRef, deleteRemote, expandOid, expandRef, fastForward, fetch, fetchObjects, findMergeBase, findRoot, gc, getConfig, getConfigAll, getRemoteInfo, hashBlob, indexPack, init, isDescendent, isIgnored, listBranches, listFiles, listRefs, listRemotes, listServerRefs, listTags, log, merge, packObjects, pull, push, readBlob, readCommit, readObject, readTree, remove, resetIndex, resolveRef, setConfig, status, statusMatrix, updateIndex$1 as updateIndex, version, walk, writeBlob, writeCommit, writeObject, writeRef, writeTree };

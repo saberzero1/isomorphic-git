@@ -5,6 +5,7 @@ import { readObjectPacked } from '../storage/readObjectPacked.js'
 import { PackfileCache, readPackIndex } from '../storage/readPackIndex.js'
 import { collect } from '../utils/collect.js'
 import { join } from '../utils/join.js'
+
 import { _pack } from './pack.js'
 
 /**
@@ -67,7 +68,10 @@ export async function _gc({ fs, cache, dir, gitdir = join(dir, '.git') }) {
 
   await fs.write(packPath, packBuffer)
 
-  const idx = await GitPackIndex.fromPack({ pack: packBuffer, getExternalRefDelta })
+  const idx = await GitPackIndex.fromPack({
+    pack: packBuffer,
+    getExternalRefDelta,
+  })
   await fs.write(idxPath, await idx.toBuffer())
 
   const sampleOids = oidsArray.slice(0, 3)

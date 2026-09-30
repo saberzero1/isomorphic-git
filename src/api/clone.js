@@ -32,6 +32,7 @@ import { join } from '../utils/join.js'
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Object<string, string>} [args.headers = {}] - Additional headers to include in HTTP requests, similar to git's `extraHeader` config
  * @param {object} [args.cache] - a [cache](cache.md) object
  * @param {boolean} [args.nonBlocking = false] - if true, checkout will happen non-blockingly (useful for long-running operations blocking the thread in browser environments)
@@ -71,6 +72,7 @@ export async function clone({
   since = undefined,
   exclude = [],
   relative = false,
+  filter = null,
   singleBranch = false,
   noCheckout = false,
   noTags = false,
@@ -110,6 +112,7 @@ export async function clone({
       since,
       exclude,
       relative,
+      filter,
       singleBranch,
       noCheckout,
       noTags,

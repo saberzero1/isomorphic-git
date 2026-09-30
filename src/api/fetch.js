@@ -39,6 +39,7 @@ import { join } from '../utils/join.js'
  * @param {boolean} [args.tags = false] - Also fetch tags
  * @param {number} [args.depth] - Integer. Determines how much of the git repository's history to retrieve
  * @param {boolean} [args.relative = false] - Changes the meaning of `depth` to be measured from the current shallow depth rather than from the branch tip.
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`. Requires the server to advertise the `filter` capability; throws `RemoteCapabilityError` if it does not.
  * @param {Date} [args.since] - Only fetch commits created after the given date. Mutually exclusive with `depth`.
  * @param {string[]} [args.exclude = []] - A list of branches or tags. Instructs the remote server not to send us any commits reachable from these refs.
  * @param {boolean} [args.prune = false] - Delete local remote-tracking branches that are not present on the remote
@@ -84,6 +85,7 @@ export async function fetch({
   since = null,
   exclude = [],
   relative = false,
+  filter = null,
   tags = false,
   singleBranch = false,
   headers = {},
@@ -117,6 +119,7 @@ export async function fetch({
       since,
       exclude,
       relative,
+      filter,
       tags,
       singleBranch,
       headers,

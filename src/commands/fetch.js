@@ -60,6 +60,7 @@ import { writeUploadPackRequest } from '../wire/writeUploadPackRequest.js'
  * @param {Object<string, string>} [args.headers]
  * @param {boolean} [args.prune]
  * @param {boolean} [args.pruneTags]
+ * @param {string} [args.filter] - Partial clone filter spec, e.g. `'blob:none'`
  *
  * @returns {Promise<FetchResult>}
  * @see FetchResult
@@ -88,6 +89,7 @@ export async function _fetch({
   headers = {},
   prune = false,
   pruneTags = false,
+  filter = null,
 }) {
   const ref = _ref || (await _currentBranch({ fs, gitdir, test: true }))
   const config = await GitConfigManager.get({ fs, gitdir })
@@ -145,6 +147,9 @@ export async function _fetch({
   if (relative === true && !remoteHTTP.capabilities.has('deepen-relative')) {
     throw new RemoteCapabilityError('deepen-relative', 'relative')
   }
+  if (filter !== null && !remoteHTTP.capabilities.has('filter')) {
+    throw new RemoteCapabilityError('filter', 'filter')
+  }
   // Figure out the SHA for the requested ref
   const { oid, fullref } = GitRefManager.resolveAgainstMap({
     ref: remoteRef,
@@ -176,6 +181,8 @@ export async function _fetch({
       // canonical git it turns out is NOT.
       'ofs-delta',
       `agent=${pkg.agent}`,
+      // Conditional so unfiltered fetches keep their exact capability list.
+      ...(filter !== null ? ['filter'] : []),
     ]
   )
   if (relative) capabilities.push('deepen-relative')
@@ -211,6 +218,7 @@ export async function _fetch({
     depth,
     since,
     exclude,
+    filter,
   })
   // CodeCommit will hang up if we don't send a Content-Length header
   // so we can't stream the body.
@@ -374,6 +382,32 @@ export async function _fetch({
       onProgress,
     })
     await fs.write(fullpath.replace(/\.pack$/, '.idx'), await idx.toBuffer())
+    if (filter !== null) {
+      await fs.write(fullpath.replace(/\.pack$/, '.promisor'), '')
+      await markRepoPartial({ fs, gitdir, remote, filter })
+    }
   }
   return res
+}
+
+/**
+ * Record that this repository is missing objects on purpose, which is what
+ * licenses the lazy fetch in readObject to treat an absent blob as fetchable
+ * rather than corrupt.
+ *
+ * `extensions.partialclone` holds the promisor *remote name*, not the filter.
+ *
+ * @param {object} args
+ * @param {import('../models/FileSystem.js').FileSystem} args.fs
+ * @param {string} args.gitdir
+ * @param {string} args.remote
+ * @param {string} args.filter
+ */
+async function markRepoPartial({ fs, gitdir, remote, filter }) {
+  const config = await GitConfigManager.get({ fs, gitdir })
+  await config.set('core.repositoryformatversion', '1')
+  await config.set('extensions.partialclone', remote)
+  await config.set(`remote.${remote}.promisor`, 'true')
+  await config.set(`remote.${remote}.partialclonefilter`, filter)
+  await GitConfigManager.save({ fs, gitdir, config })
 }
